@@ -6,8 +6,14 @@
 // Copyright (c) Microsoft Corporation. All rights reserved.
 //--------------------------------------------------------------------------------------
 #include <windows.h>
+#include<d3d10_1.h>
 #include <d3d10.h>
 #include <d3dx10.h>
+#include "DXUT.h"
+#include "DXUTcamera.h"
+#include "DXUTmisc.h"
+#include "SDKmisc.h"
+#include "SDKmesh.h"
 #include "resource.h"
 
 
@@ -39,6 +45,11 @@ ID3D10EffectTechnique*      g_pTechnique = NULL;
 ID3D10InputLayout*          g_pVertexLayout = NULL;
 ID3D10Buffer*               g_pVertexBuffer = NULL;
 ID3D10Buffer*               g_pIndexBuffer = NULL;
+ID3D10EffectTechnique*      g_pTechniqueRenderLight = NULL;
+ID3D10EffectVectorVariable* g_pLightDirVariable = NULL;
+ID3D10EffectVectorVariable* g_pLightColorVariable = NULL;
+ID3D10EffectVectorVariable* g_pOutputColorVariable = NULL;
+ID3D10EffectShaderResourceVariable* g_ptxDiffuseVariable = NULL;
 ID3D10EffectMatrixVariable* g_pWorldVariable = NULL;
 ID3D10EffectMatrixVariable* g_pViewVariable = NULL;
 ID3D10EffectMatrixVariable* g_pProjectionVariable = NULL;
@@ -46,11 +57,15 @@ D3DXMATRIX                  g_World1;
 D3DXMATRIX                  g_World2;
 D3DXMATRIX                  g_View;
 D3DXMATRIX                  g_Projection;
-
-
+CDXUTSDKMesh                        g_Mesh;
+CModelViewerCamera                  g_Camera;               // A model viewing camera
 //--------------------------------------------------------------------------------------
 // Forward declarations
 //--------------------------------------------------------------------------------------
+HRESULT CALLBACK OnD3D10ResizedSwapChain( ID3D10Device* pd3dDevice, IDXGISwapChain* pSwapChain,
+                                          const DXGI_SURFACE_DESC* pBufferSurfaceDesc, void* pUserContext );
+void CALLBACK OnD3D10ReleasingSwapChain( void* pUserContext );
+void CALLBACK OnFrameMove( double fTime, float fElapsedTime, void* pUserContext );
 HRESULT InitWindow( HINSTANCE hInstance, int nCmdShow );
 HRESULT InitDevice();
 void CleanupDevice();
@@ -66,7 +81,9 @@ int WINAPI wWinMain( HINSTANCE hInstance, HINSTANCE hPrevInstance, LPWSTR lpCmdL
 {
     UNREFERENCED_PARAMETER( hPrevInstance );
     UNREFERENCED_PARAMETER( lpCmdLine );
-
+	DXUTSetCallbackD3D10SwapChainResized( OnD3D10ResizedSwapChain );
+    DXUTSetCallbackD3D10SwapChainReleasing( OnD3D10ReleasingSwapChain );
+	 DXUTSetCallbackFrameMove( OnFrameMove );
     if( FAILED( InitWindow( hInstance, nCmdShow ) ) )
         return 0;
 
@@ -134,6 +151,21 @@ HRESULT InitWindow( HINSTANCE hInstance, int nCmdShow )
     return S_OK;
 }
 
+HRESULT CALLBACK OnD3D10ResizedSwapChain( ID3D10Device* pd3dDevice, IDXGISwapChain* pSwapChain,
+                                          const DXGI_SURFACE_DESC* pBufferSurfaceDesc, void* pUserContext )
+{
+    // Setup the projection parameters again
+    float fAspectRatio = static_cast<float>( pBufferSurfaceDesc->Width ) /
+        static_cast<float>( pBufferSurfaceDesc->Height );
+    g_Camera.SetProjParams( D3DX_PI / 4, fAspectRatio, 0.1f, 5000.0f );
+    g_Camera.SetWindow( pBufferSurfaceDesc->Width, pBufferSurfaceDesc->Height );
+    g_Camera.SetButtonMasks( MOUSE_MIDDLE_BUTTON, MOUSE_WHEEL, MOUSE_LEFT_BUTTON );
+
+    return S_OK;
+}
+void CALLBACK OnD3D10ReleasingSwapChain( void* pUserContext )
+{
+}
 
 //--------------------------------------------------------------------------------------
 // Create Direct3D device and swap chain
@@ -253,17 +285,22 @@ HRESULT InitDevice()
 
     // Obtain the technique
     g_pTechnique = g_pEffect->GetTechniqueByName( "Render" );
-
+	g_pTechniqueRenderLight = g_pEffect->GetTechniqueByName( "RenderLight" );
+	g_ptxDiffuseVariable = g_pEffect->GetVariableByName( "g_txDiffuse" )->AsShaderResource();
+  
     // Obtain the variables
     g_pWorldVariable = g_pEffect->GetVariableByName( "World" )->AsMatrix();
     g_pViewVariable = g_pEffect->GetVariableByName( "View" )->AsMatrix();
     g_pProjectionVariable = g_pEffect->GetVariableByName( "Projection" )->AsMatrix();
-
+	   g_pLightDirVariable = g_pEffect->GetVariableByName( "vLightDir" )->AsVector();
+    g_pLightColorVariable = g_pEffect->GetVariableByName( "vLightColor" )->AsVector();
+    g_pOutputColorVariable = g_pEffect->GetVariableByName( "vOutputColor" )->AsVector();
     // Define the input layout
     D3D10_INPUT_ELEMENT_DESC layout[] =
     {
         { "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D10_INPUT_PER_VERTEX_DATA, 0 },
-        { "COLOR", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 12, D3D10_INPUT_PER_VERTEX_DATA, 0 },
+        { "NORMAL", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 12, D3D10_INPUT_PER_VERTEX_DATA, 0 },
+        { "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 24, D3D10_INPUT_PER_VERTEX_DATA, 0 },
     };
     UINT numElements = sizeof( layout ) / sizeof( layout[0] );
 
@@ -279,84 +316,25 @@ HRESULT InitDevice()
     g_pd3dDevice->IASetInputLayout( g_pVertexLayout );
 
     // Create vertex buffer
-    SimpleVertex vertices[] =
-    {
-        { D3DXVECTOR3( -1.0f, 1.0f, -1.0f ), D3DXVECTOR4( 0.0f, 0.0f, 1.0f, 1.0f ) },
-        { D3DXVECTOR3( 1.0f, 1.0f, -1.0f ), D3DXVECTOR4( 0.0f, 1.0f, 0.0f, 1.0f ) },
-        { D3DXVECTOR3( 1.0f, 1.0f, 1.0f ), D3DXVECTOR4( 0.0f, 1.0f, 1.0f, 1.0f ) },
-        { D3DXVECTOR3( -1.0f, 1.0f, 1.0f ), D3DXVECTOR4( 1.0f, 0.0f, 0.0f, 1.0f ) },
-        { D3DXVECTOR3( -1.0f, -1.0f, -1.0f ), D3DXVECTOR4( 1.0f, 0.0f, 1.0f, 1.0f ) },
-        { D3DXVECTOR3( 1.0f, -1.0f, -1.0f ), D3DXVECTOR4( 1.0f, 1.0f, 0.0f, 1.0f ) },
-        { D3DXVECTOR3( 1.0f, -1.0f, 1.0f ), D3DXVECTOR4( 1.0f, 1.0f, 1.0f, 1.0f ) },
-        { D3DXVECTOR3( -1.0f, -1.0f, 1.0f ), D3DXVECTOR4( 0.0f, 0.0f, 0.0f, 1.0f ) },
-    };
-    D3D10_BUFFER_DESC bd;
-    bd.Usage = D3D10_USAGE_DEFAULT;
-    bd.ByteWidth = sizeof( SimpleVertex ) * 8;
-    bd.BindFlags = D3D10_BIND_VERTEX_BUFFER;
-    bd.CPUAccessFlags = 0;
-    bd.MiscFlags = 0;
-    D3D10_SUBRESOURCE_DATA InitData;
-    InitData.pSysMem = vertices;
-    hr = g_pd3dDevice->CreateBuffer( &bd, &InitData, &g_pVertexBuffer );
-    if( FAILED( hr ) )
-        return hr;
-
-    // Set vertex buffer
-    UINT stride = sizeof( SimpleVertex );
-    UINT offset = 0;
-    g_pd3dDevice->IASetVertexBuffers( 0, 1, &g_pVertexBuffer, &stride, &offset );
-
-    // Create index buffer
-    // Create vertex buffer
-    DWORD indices[] =
-    {
-        3,1,0,
-        2,1,3,
-
-        0,5,4,
-        1,5,0,
-
-        3,4,7,
-        0,4,3,
-
-        1,6,5,
-        2,6,1,
-
-        2,7,6,
-        3,7,2,
-
-        6,4,5,
-        7,4,6,
-    };
-    bd.Usage = D3D10_USAGE_DEFAULT;
-    bd.ByteWidth = sizeof( DWORD ) * 36;
-    bd.BindFlags = D3D10_BIND_INDEX_BUFFER;
-    bd.CPUAccessFlags = 0;
-    bd.MiscFlags = 0;
-    InitData.pSysMem = indices;
-    hr = g_pd3dDevice->CreateBuffer( &bd, &InitData, &g_pIndexBuffer );
-    if( FAILED( hr ) )
-        return hr;
-
-    // Set index buffer
-    g_pd3dDevice->IASetIndexBuffer( g_pIndexBuffer, DXGI_FORMAT_R32_UINT, 0 );
-
-    // Set primitive topology
-    g_pd3dDevice->IASetPrimitiveTopology( D3D10_PRIMITIVE_TOPOLOGY_TRIANGLELIST );
+  V_RETURN( g_Mesh.Create(  g_pd3dDevice, L"Tiny\\tiny.sdkmesh", true ) );
 
     // Initialize the world matrices
     D3DXMatrixIdentity( &g_World1 );
     D3DXMatrixIdentity( &g_World2 );
 
     // Initialize the view matrix
-    D3DXVECTOR3 Eye( 0.0f, 1.0f, -10.0f );
+    D3DXVECTOR3 Eye( 0.0f, 1.0f, -300.0f );
     D3DXVECTOR3 At( 0.0f, 1.0f, 0.0f );
     D3DXVECTOR3 Up( 0.0f, 1.0f, 0.0f );
+
     D3DXMatrixLookAtLH( &g_View, &Eye, &At, &Up );
 
     // Initialize the projection matrix
-    D3DXMatrixPerspectiveFovLH( &g_Projection, ( float )D3DX_PI * 0.25f, width / ( FLOAT )height, 0.1f, 100.0f );
+    D3DXMatrixPerspectiveFovLH( &g_Projection, ( float )D3DX_PI * 0.25f, width / ( FLOAT )height, 0.9f, 1500.0f );
+
+	   D3DXVECTOR3 Eye1( 0.0f, 0.0f, -800.0f );
+    D3DXVECTOR3 At1( 0.0f, 0.0f, 0.0f );
+    g_Camera.SetViewParams( &Eye1, &At1 );
 
     return TRUE;
 }
@@ -388,7 +366,7 @@ LRESULT CALLBACK WndProc( HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam 
 {
     PAINTSTRUCT ps;
     HDC hdc;
-
+	   g_Camera.HandleMessages( hWnd, message, wParam, lParam );
     switch( message )
     {
         case WM_PAINT:
@@ -430,20 +408,30 @@ void Render()
 
     // 1st Cube: Rotate around the origin
     D3DXMatrixRotationY( &g_World1, t );
+	   D3DXMATRIX mScale;
+ ;
+    
+    D3DXMatrixScaling( &mScale, 1.0f, 1.0f, 1.0f );
+    D3DXMatrixMultiply( &g_World1, &g_World1, &mScale );
+ 
+	 D3DXVECTOR4 vLightDirs[2] =
+    {
+        D3DXVECTOR4( -0.577f, 0.577f, -0.577f, 1.0f ),
+        D3DXVECTOR4( 0.0f, 0.0f, -1.0f, 1.0f ),
+    };
+    D3DXVECTOR4 vLightColors[2] =
+    {
+        D3DXVECTOR4( 0.5f, 0.5f, 0.5f, 1.0f ),
+        D3DXVECTOR4( 0.5f, 0.0f, 0.0f, 1.0f )
+    };
 
-    // 2nd Cube:  Rotate around origin
-    D3DXMATRIX mTranslate;
-    D3DXMATRIX mOrbit;
-    D3DXMATRIX mSpin;
-    D3DXMATRIX mScale;
-    D3DXMatrixRotationZ( &mSpin, -t );
-    D3DXMatrixRotationY( &mOrbit, -t * 2.0f );
-    D3DXMatrixTranslation( &mTranslate, -4.0f, 0.0f, 0.0f );
-    D3DXMatrixScaling( &mScale, 0.3f, 0.3f, 0.3f );
+    //rotate the second light around the origin
+    D3DXMATRIX mRotate;
+    D3DXVECTOR4 vOutDir;
+    D3DXMatrixRotationY( &mRotate, -2.0f * t );
+    D3DXVec3Transform( &vLightDirs[1], ( D3DXVECTOR3* )&vLightDirs[1], &mRotate );
 
-    D3DXMatrixMultiply( &g_World2, &mScale, &mSpin );
-    D3DXMatrixMultiply( &g_World2, &g_World2, &mTranslate );
-    D3DXMatrixMultiply( &g_World2, &g_World2, &mOrbit );
+   
 
     //
     // Clear the back buffer
@@ -460,36 +448,70 @@ void Render()
     // Update variables for the first cube
     //
     g_pWorldVariable->SetMatrix( ( float* )&g_World1 );
-    g_pViewVariable->SetMatrix( ( float* )&g_View );
-    g_pProjectionVariable->SetMatrix( ( float* )&g_Projection );
-
+       g_pProjectionVariable->SetMatrix( ( float* )g_Camera.GetProjMatrix() );
+    g_pViewVariable->SetMatrix( ( float* )g_Camera.GetViewMatrix() );
     //
     // Render the first cube
     //
+   g_pd3dDevice->IASetInputLayout( g_pVertexLayout );
+
+    //
+    // Render the mesh
+    //
+    UINT Strides[1];
+    UINT Offsets[1];
+    ID3D10Buffer* pVB[1];
+    pVB[0] = g_Mesh.GetVB10( 0, 0 );
+    Strides[0] = ( UINT )g_Mesh.GetVertexStride( 0, 0 );
+    Offsets[0] = 0;
+    g_pd3dDevice->IASetVertexBuffers( 0, 1, pVB, Strides, Offsets );
+   g_pd3dDevice->IASetIndexBuffer( g_Mesh.GetIB10( 0 ), g_Mesh.GetIBFormat10( 0 ), 0 );
+
     D3D10_TECHNIQUE_DESC techDesc;
     g_pTechnique->GetDesc( &techDesc );
+    SDKMESH_SUBSET* pSubset = NULL;
+    ID3D10ShaderResourceView* pDiffuseRV = NULL;
+    D3D10_PRIMITIVE_TOPOLOGY PrimType;
+		  g_pLightDirVariable->SetFloatVectorArray( ( float* )vLightDirs, 0, 2 );
+    g_pLightColorVariable->SetFloatVectorArray( ( float* )vLightColors, 0, 2 );
+
     for( UINT p = 0; p < techDesc.Passes; ++p )
     {
-        g_pTechnique->GetPassByIndex( p )->Apply( 0 );
-        g_pd3dDevice->DrawIndexed( 36, 0, 0 );
+        for( UINT subset = 0; subset < g_Mesh.GetNumSubsets( 0 ); ++subset )
+        {
+            pSubset = g_Mesh.GetSubset( 0, subset );
+
+            PrimType = g_Mesh.GetPrimitiveType10( ( SDKMESH_PRIMITIVE_TYPE )pSubset->PrimitiveType );
+            g_pd3dDevice->IASetPrimitiveTopology( PrimType );
+
+            pDiffuseRV = g_Mesh.GetMaterial( pSubset->MaterialID )->pDiffuseRV10;
+            g_ptxDiffuseVariable->SetResource( pDiffuseRV );
+
+            g_pTechnique->GetPassByIndex( p )->Apply( 0 );
+           g_pd3dDevice->DrawIndexed( ( UINT )pSubset->IndexCount, 0, ( UINT )pSubset->VertexStart );
+        }
     }
-
-    //
-    // Update variables for the second cube
-    //
-    g_pWorldVariable->SetMatrix( ( float* )&g_World2 );
-    g_pViewVariable->SetMatrix( ( float* )&g_View );
-    g_pProjectionVariable->SetMatrix( ( float* )&g_Projection );
-
-    //
-    // Render the second cube
-    //
-    for( UINT p = 0; p < techDesc.Passes; ++p )
+	for( int m = 0; m < 2; m++ )
     {
-        g_pTechnique->GetPassByIndex( p )->Apply( 0 );
-        g_pd3dDevice->DrawIndexed( 36, 0, 0 );
-    }
+        D3DXMATRIX mLight;
+        D3DXMATRIX mLightScale;
+        D3DXVECTOR3 vLightPos = vLightDirs[m] * 5.0f;
+        D3DXMatrixTranslation( &mLight, vLightPos.x, vLightPos.y, vLightPos.z );
+        D3DXMatrixScaling( &mLightScale, 0.2f, 0.2f, 0.2f );
+        mLight = mLightScale * mLight;
 
+        // Update the world variable to reflect the current light
+        g_pWorldVariable->SetMatrix( ( float* )&mLight );
+        g_pOutputColorVariable->SetFloatVector( ( float* )&vLightColors[m] );
+
+        g_pTechniqueRenderLight->GetDesc( &techDesc );
+        for( UINT p = 0; p < techDesc.Passes; ++p )
+        {
+            g_pTechniqueRenderLight->GetPassByIndex( p )->Apply( 0 );
+             g_pd3dDevice->DrawIndexed( 36, 0, 0 );
+        }
+
+    }
     //
     // Present our back buffer to our front buffer
     //
@@ -497,3 +519,8 @@ void Render()
 }
 
 
+void CALLBACK OnFrameMove( double fTime, float fElapsedTime, void* pUserContext )
+{
+    // Rotate cube around the origin
+   g_Camera.FrameMove( fElapsedTime );
+}
