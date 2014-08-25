@@ -10,6 +10,12 @@ void camera::SetViewMatrix( D3DXVECTOR3 vEyePt1,D3DXVECTOR3 vLookatPt1,D3DXVECTO
 	vLookatPt = vLookatPt1;
 	vUpVec = vUpVec1;
 	D3DXMatrixLookAtLH( &matView, &vEyePt, &vLookatPt, &vUpVec );
+	D3DXMATRIX tmp;
+	D3DXMatrixInverse( &tmp, NULL, &matView );
+	D3DXVECTOR3* pZBasis = (D3DXVECTOR3*) &tmp._31;
+	CameraYawAngle   = atan2f( pZBasis->x, pZBasis->z );
+	float fLen = sqrtf(pZBasis->z*pZBasis->z + pZBasis->x*pZBasis->x);
+	CameraPitchAngle = -atan2f( pZBasis->y, fLen );
 }
 void camera::SetProjMatrix(float fFOV, float fAspect, float fNear, float fFar)
 {
@@ -61,6 +67,26 @@ void  camera::ProcessKey(float fElapsedTime)
 }
 void camera::Update(float fElapsedTime)
 {
+	POINT CurrentPos = {0, 0};
+	POINT DeltaPos = {0, 0};
+
+	if(IsRot)
+	{
+		
+		GetCursorPos(&CurrentPos);
+		DeltaPos.x = CurrentPos.x - LastPoint.x;
+		DeltaPos.y = CurrentPos.y - LastPoint.y;
+		LastPoint = CurrentPos;
+
+		float fYaw = DeltaPos.x*0.01f;
+		float fPitch = DeltaPos.y*0.01f;
+
+
+		CameraYawAngle   += fYaw;
+		CameraPitchAngle += fPitch;
+
+	}
+
 	 ProcessKey(fElapsedTime);
 	D3DXVECTOR3 head = D3DXVECTOR3(0,0,1);
 		if(IsTrans)
@@ -75,4 +101,27 @@ void camera::Update(float fElapsedTime)
 
 
 	D3DXMatrixLookAtLH( &matView, &vEyePt, &vLookatPt, &vUpVec );
+}
+LRESULT camera::HandleMessage(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
+{
+	//m_vDelta = D3DXVECTOR3(0.f, 0.f, 0.f);
+	// setcapture getcursorPos
+	switch( msg )
+	{	
+	case WM_LBUTTONDOWN:
+		{
+			IsRot = true;
+			SetCapture(hWnd);
+			GetCursorPos(&LastPoint);
+		}
+		break;
+	case WM_LBUTTONUP:
+		{
+			IsRot = false;
+			ReleaseCapture();
+		}
+		break;
+	}
+
+	return 0;
 }
