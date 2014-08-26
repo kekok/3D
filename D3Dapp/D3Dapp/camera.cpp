@@ -3,6 +3,11 @@
 camera::camera(bool trans)
 {
 	IsTrans = trans;
+	Delta = D3DXVECTOR3(0.f, 0.f, 0.f);
+	CameraYawAngle=0.0f;
+	CameraPitchAngle=0.0f;
+	IsRot  = true;
+	
 }
 void camera::SetViewMatrix( D3DXVECTOR3 vEyePt1,D3DXVECTOR3 vLookatPt1,D3DXVECTOR3 vUpVec1)
 {
@@ -32,7 +37,7 @@ void camera::apply(LPDIRECT3DDEVICE9  pDevice)
 void  camera::ProcessKey(float fElapsedTime)
 {
 	Delta = D3DXVECTOR3(0.f, 0.f, 0.f);
-	float fVelocity = 20 * fElapsedTime;
+	float fVelocity = 10 * fElapsedTime;
 
 	if( GetKeyState('W') & 0x8000 )
 	{
@@ -78,23 +83,34 @@ void camera::Update(float fElapsedTime)
 		DeltaPos.y = CurrentPos.y - LastPoint.y;
 		LastPoint = CurrentPos;
 
-		float fYaw = DeltaPos.x*0.01f;
-		float fPitch = DeltaPos.y*0.01f;
+		float fYaw = DeltaPos.x*0.001f;
+		float fPitch = DeltaPos.y*0.001f;
 
 
 		CameraYawAngle   += fYaw;
 		CameraPitchAngle += fPitch;
 
 	}
+	D3DXMATRIX matCameraRot;
+	ZeroMemory(&matCameraRot, sizeof(D3DXMATRIX));
+	D3DXMatrixRotationYawPitchRoll(&matCameraRot,CameraYawAngle, CameraPitchAngle,0.f);
+
+	
+	D3DXVECTOR3 WorldUp, WorldAhead;
+	D3DXVECTOR3 LocalUp    = D3DXVECTOR3(0,1,0);
+	D3DXVECTOR3 LocalAhead = D3DXVECTOR3(0,0,1);
+	D3DXVec3TransformCoord( &WorldUp, &LocalUp, &matCameraRot );
+	D3DXVec3TransformCoord( &WorldAhead, &LocalAhead, &matCameraRot );
 
 	 ProcessKey(fElapsedTime);
-	D3DXVECTOR3 head = D3DXVECTOR3(0,0,1);
+	
 		if(IsTrans)
 	{
 	
-		
+		D3DXVECTOR3 vWorldDelta;
+		D3DXVec3TransformCoord( &vWorldDelta, &Delta, &matCameraRot );
 		 vEyePt += Delta;
-		 vLookatPt =  vEyePt +head;
+		 vLookatPt =  vEyePt + WorldAhead;
 	}
  // IsTrans = false;
 	
@@ -104,8 +120,7 @@ void camera::Update(float fElapsedTime)
 }
 LRESULT camera::HandleMessage(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
-	//m_vDelta = D3DXVECTOR3(0.f, 0.f, 0.f);
-	// setcapture getcursorPos
+
 	switch( msg )
 	{	
 	case WM_LBUTTONDOWN:
