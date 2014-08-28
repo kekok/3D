@@ -198,7 +198,7 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
 	InitGeometry();
 	
 
-	Camera.SetViewMatrix( D3DXVECTOR3(0.0f, 3.0f,-5.0f ),D3DXVECTOR3(0.0f, 0.0f, 0.0f),D3DXVECTOR3( 0.0f, 1.0f, 0.0f ));
+	Camera.SetViewMatrix( D3DXVECTOR3(0.0f, 3.0f,-5.0f ),D3DXVECTOR3(0.0f, 0.0f, 1.0f),D3DXVECTOR3( 0.0f, 1.0f, 0.0f ));
 	Camera.SetProjMatrix(D3DX_PI / 4, 1.0f, 1.0f, 100.0f);
    return TRUE;
 }
@@ -374,7 +374,8 @@ void Render()
         // Setup the world, view, and projection matrices
 		SetupLights();
         D3DXMATRIXA16 matWorld;
-	
+		//D3DXMatrixTranslation(&matWorld,Camera.Delta.x,Camera.Delta.y,Camera.Delta.x);
+		
     D3DXMatrixRotationY( &matWorld, timeGetTime() / 1000.0f );
     g_pd3dDevice->SetTransform( D3DTS_WORLD, &matWorld );
 	Camera.apply(g_pd3dDevice);

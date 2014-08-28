@@ -6,7 +6,7 @@ camera::camera(bool trans)
 	Delta = D3DXVECTOR3(0.f, 0.f, 0.f);
 	CameraYawAngle=0.0f;
 	CameraPitchAngle=0.0f;
-	IsRot  = true;
+	IsRot  = false;
 	
 }
 void camera::SetViewMatrix( D3DXVECTOR3 vEyePt1,D3DXVECTOR3 vLookatPt1,D3DXVECTOR3 vUpVec1)
@@ -74,7 +74,8 @@ void camera::Update(float fElapsedTime)
 {
 	POINT CurrentPos = {0, 0};
 	POINT DeltaPos = {0, 0};
-
+	double xangle  = 0;
+	double yangle = 0;
 	if(IsRot)
 	{
 		
@@ -85,15 +86,32 @@ void camera::Update(float fElapsedTime)
 
 		float fYaw = DeltaPos.x*0.001f;
 		float fPitch = DeltaPos.y*0.001f;
-
+		xangle= DeltaPos.x*0.0087266f;
+		 yangle =DeltaPos.y*0.0087266f;
 
 		CameraYawAngle   += fYaw;
 		CameraPitchAngle += fPitch;
 
 	}
+	D3DXMATRIX T;
+	D3DXVECTOR3 tmp(1,0,0);
+	D3DXMatrixRotationAxis(&T, &vLookatPt,xangle);
+
+
+	D3DXVec3TransformCoord(&vUpVec,&vUpVec, &T);
+	D3DXVec3TransformCoord(&vEyePt,&vEyePt, &T);
+	D3DXVec3TransformCoord(&Delta,&Delta, &T);
+	D3DXMATRIX M;
+
+
+	
+	D3DXMatrixRotationAxis(&M, &vUpVec,yangle);
+	D3DXVec3TransformCoord(&vLookatPt,&vLookatPt, &M);
+	D3DXVec3TransformCoord(&vEyePt,&vEyePt, &M);
+	D3DXVec3TransformCoord(&Delta,&Delta, &M);
 	D3DXMATRIX matCameraRot;
 	ZeroMemory(&matCameraRot, sizeof(D3DXMATRIX));
-	D3DXMatrixRotationYawPitchRoll(&matCameraRot,CameraYawAngle, CameraPitchAngle,0.f);
+	D3DXMatrixRotationYawPitchRoll(&matCameraRot,yangle,xangle,0.f);
 
 	
 	D3DXVECTOR3 WorldUp, WorldAhead;
@@ -108,9 +126,10 @@ void camera::Update(float fElapsedTime)
 	{
 	
 		D3DXVECTOR3 vWorldDelta;
-		D3DXVec3TransformCoord( &vWorldDelta, &Delta, &matCameraRot );
-		 vEyePt += Delta;
-		 vLookatPt =  vEyePt + WorldAhead;
+		//D3DXVec3TransformCoord( &vWorldDelta, &Delta, &matCameraRot );
+		
+		// vEyePt += Delta;
+		// vLookatPt =  vEyePt + WorldAhead;
 	}
  // IsTrans = false;
 	
